@@ -1,0 +1,106 @@
+RAM Allocation [bytes]
+Variable                                                                          Address   Size
+------------------------------------------------------------------------------------------------
+rx_buffer                                                                         0x0404     254
+adm_phone_tmp                                                                     0x0502      12
+timer_ping                                                                        0x050E       2
+flag                                                                              0x0510       1
+i                                                                                 0x0511       1
+_base_y                                                                           0x0512       4
+
+EEPROM Allocation [bytes]
+Variable                                                                          Address   Size
+------------------------------------------------------------------------------------------------
+adm_phone                                                                         0x0000      12
+
+Register Allocation
+Variable                                                                          Register  Size
+------------------------------------------------------------------------------------------------
+rx_wr_index                                                                       R4           1
+_lcd_x                                                                            R3           1
+_lcd_y                                                                            R6           1
+_lcd_maxx                                                                         R5           1
+
+FLASH Allocation [words]
+Function                                                                          Address   Size
+------------------------------------------------------------------------------------------------
+timer1_ovf_isr_100ms                                                              0x00155     37
+usart_rx_isr                                                                      0x0017A     30
+init_dev                                                                          0x00198    108
+print_uart_to_lcd                                                                 0x00204     78
+send_sms                                                                          0x00252     38
+send_call                                                                         0x00278     37
+pow_sw                                                                            0x0029D     23
+call_func                                                                         0x002B4     58
+cpy_ram_ph                                                                        0x002EE     22
+reg_admin                                                                         0x00304     50
+clr_sms                                                                           0x00336      9
+sms_cmd                                                                           0x0033F     32
+sms_func                                                                          0x0035F      3
+wait_modem                                                                        0x00362     42
+conf_m590                                                                         0x0038C     28
+gsm_func                                                                          0x003A8     16
+rst_gsm                                                                           0x003B8      7
+gsm_ping                                                                          0x003BF     29
+pc_pow_control                                                                    0x003DC     20
+main                                                                              0x003F0     22
+_lcd_write_nibble_G100                                                            0x00406     20
+_lcd_write_data                                                                   0x0041A     13
+lcd_gotoxy                                                                        0x00427     13
+lcd_clear                                                                         0x00434     12
+lcd_putchar                                                                       0x00440     21
+lcd_puts                                                                          0x00455     10
+lcd_putse                                                                         0x0045F     18
+lcd_init                                                                          0x00471     45
+putchar                                                                           0x0049E     10
+puts                                                                              0x004A8     14
+put_buff_G101                                                                     0x004B6     57
+_print_G101                                                                       0x004EF    308
+sprintf                                                                           0x00623     52
+memset                                                                            0x00657     16
+strcat                                                                            0x00667     17
+strlen                                                                            0x00678     12
+strlenf                                                                           0x00684     13
+strstr                                                                            0x00691     23
+
+FLASH Allocation [words]
+Function                                                                          Address   Size
+------------------------------------------------------------------------------------------------
+timer1_ovf_isr_100ms                                                              0x00155     37
+usart_rx_isr                                                                      0x0017A     30
+init_dev                                                                          0x00198    108
+print_uart_to_lcd                                                                 0x00204     78
+send_sms                                                                          0x00252     38
+send_call                                                                         0x00278     37
+pow_sw                                                                            0x0029D     23
+call_func                                                                         0x002B4     58
+cpy_ram_ph                                                                        0x002EE     22
+reg_admin                                                                         0x00304     50
+clr_sms                                                                           0x00336      9
+sms_cmd                                                                           0x0033F     32
+sms_func                                                                          0x0035F      3
+wait_modem                                                                        0x00362     42
+conf_m590                                                                         0x0038C     28
+gsm_func                                                                          0x003A8     16
+rst_gsm                                                                           0x003B8      7
+gsm_ping                                                                          0x003BF     29
+pc_pow_control                                                                    0x003DC     20
+main                                                                              0x003F0     22
+_lcd_write_nibble_G100                                                            0x00406     20
+_lcd_write_data                                                                   0x0041A     13
+lcd_gotoxy                                                                        0x00427     13
+lcd_clear                                                                         0x00434     12
+lcd_putchar                                                                       0x00440     21
+lcd_puts                                                                          0x00455     10
+lcd_putse                                                                         0x0045F     18
+lcd_init                                                                          0x00471     45
+putchar                                                                           0x0049E     10
+puts                                                                              0x004A8     14
+put_buff_G101                                                                     0x004B6     57
+_print_G101                                                                       0x004EF    308
+sprintf                                                                           0x00623     52
+memset                                                                            0x00657     16
+strcat                                                                            0x00667     17
+strlen                                                                            0x00678     12
+strlenf                                                                           0x00684     13
+strstr                                                                            0x00691     23

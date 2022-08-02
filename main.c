@@ -1,0 +1,526 @@
+#include <mega328p.h>  
+#include <delay.h>
+#include <alcd.h>
+#include <stdio.h>
+#include <string.h>
+
+#define SBR(port, bit)        port |= (1<<bit)
+#define CBR(port, bit)        port &= (~(1<<bit))
+#define INV(port, bit)        port ^= (1<<bit)
+#define SBRC(port, bit)      ((port & (1<<bit)) == 0)
+#define SBRS(port, bit)      ((port & (1<<bit)) != 0)
+
+#define  LIGHT_LCD           PORTB.2
+#define  RELAY_ON            DDRC.5=1
+#define  RELAY_OFF           DDRC.5=0
+#define  IN_5V               PINC.1
+#define  POWER_SW            PORTC.2
+#define  LED                 PORTB.5
+#define  SHORT               0
+#define  LONG                1
+
+#define RST_BUF              rx_wr_index=0
+
+#define DATA_REGISTER_EMPTY (1<<UDRE0)
+#define RX_COMPLETE (1<<RXC0)
+#define FRAMING_ERROR (1<<FE0)
+#define PARITY_ERROR (1<<UPE0)
+#define DATA_OVERRUN (1<<DOR0)
+
+//FLAGS***********************************************
+#define START_PING_GSM      0
+#define CALL_SENDED         1
+//****************************************************
+
+#define RX_BUFFER_SIZE0 254
+char rx_buffer[RX_BUFFER_SIZE0];
+
+unsigned char rx_wr_index,
+              adm_phone_tmp[12];
+
+volatile unsigned int timer_ping;
+volatile unsigned char flag;
+
+eeprom unsigned char adm_phone[12]={0};
+
+void gsm_ping();
+void rst_gsm();
+
+interrupt [TIM1_OVF] void timer1_ovf_isr_100ms(void)
+{
+  TCNT1H=0x9E58 >> 8;
+  TCNT1L=0x9E58 & 0xff;
+  
+  //TIMER PING***************************************
+  timer_ping++;
+  if(timer_ping > 1200) // 120sec
+  {
+    timer_ping = 0;
+    
+    SBR(flag, START_PING_GSM); 
+  }   
+  //*************************************************
+  
+}
+
+interrupt [USART_RXC] void usart_rx_isr(void)
+{
+    char status,data;
+ 
+    status = UCSR0A;
+    data = UDR0;
+    
+    if ((status & (FRAMING_ERROR | PARITY_ERROR | DATA_OVERRUN)) == 0)
+    {
+        rx_buffer[rx_wr_index++] = data;
+                
+        if (rx_wr_index == RX_BUFFER_SIZE0) RST_BUF;                
+    }
+}
+
+void init_dev()
+{
+#pragma optsize-
+CLKPR=(1<<CLKPCE);
+CLKPR=(0<<CLKPCE) | (0<<CLKPS3) | (0<<CLKPS2) | (0<<CLKPS1) | (0<<CLKPS0);
+#ifdef _OPTIMIZE_SIZE_
+#pragma optsize+
+#endif
+
+// Input/Output Ports initialization
+// Port B initialization
+// Function: Bit7=Out Bit6=Out Bit5=Out Bit4=Out Bit3=Out Bit2=Out Bit1=Out Bit0=Out 
+DDRB=(1<<DDB7) | (1<<DDB6) | (1<<DDB5) | (1<<DDB4) | (1<<DDB3) | (1<<DDB2) | (1<<DDB1) | (1<<DDB0);
+// State: Bit7=0 Bit6=0 Bit5=0 Bit4=0 Bit3=0 Bit2=0 Bit1=0 Bit0=0 
+PORTB=(0<<PORTB7) | (0<<PORTB6) | (0<<PORTB5) | (0<<PORTB4) | (0<<PORTB3) | (0<<PORTB2) | (0<<PORTB1) | (0<<PORTB0);
+
+// Port C initialization
+// Function: Bit6=In Bit5=In Bit4=In Bit3=In Bit2=In Bit1=In Bit0=In 
+DDRC=(0<<DDC6) | (0<<DDC5) | (0<<DDC4) | (0<<DDC3) | (1<<DDC2) | (0<<DDC1) | (0<<DDC0);
+// State: Bit6=T Bit5=T Bit4=T Bit3=T Bit2=T Bit1=T Bit0=T 
+PORTC=(0<<PORTC6) | (0<<PORTC5) | (0<<PORTC4) | (0<<PORTC3) | (1<<PORTC2) | (0<<PORTC1) | (0<<PORTC0);
+
+// Port D initialization
+// Function: Bit7=Out Bit6=Out Bit5=Out Bit4=Out Bit3=Out Bit2=Out Bit1=Out Bit0=Out 
+DDRD=(1<<DDD7) | (1<<DDD6) | (1<<DDD5) | (1<<DDD4) | (1<<DDD3) | (1<<DDD2) | (1<<DDD1) | (1<<DDD0);
+// State: Bit7=0 Bit6=0 Bit5=0 Bit4=0 Bit3=0 Bit2=0 Bit1=0 Bit0=0 
+PORTD=(0<<PORTD7) | (0<<PORTD6) | (0<<PORTD5) | (0<<PORTD4) | (0<<PORTD3) | (0<<PORTD2) | (0<<PORTD1) | (0<<PORTD0);
+
+// Timer/Counter 0 initialization
+// Clock source: System Clock
+// Clock value: Timer 0 Stopped
+// Mode: Normal top=0xFF
+// OC0A output: Disconnected
+// OC0B output: Disconnected
+TCCR0A=(0<<COM0A1) | (0<<COM0A0) | (0<<COM0B1) | (0<<COM0B0) | (0<<WGM01) | (0<<WGM00);
+TCCR0B=(0<<WGM02) | (0<<CS02) | (0<<CS01) | (0<<CS00);
+TCNT0=0x00;
+OCR0A=0x00;
+OCR0B=0x00;
+
+// Timer/Counter 1 initialization
+// Clock source: System Clock
+// Clock value: Timer1 Stopped
+// Mode: Normal top=0xFFFF
+// OC1A output: Disconnected
+// OC1B output: Disconnected
+// Noise Canceler: Off
+// Input Capture on Falling Edge
+// Timer1 Overflow Interrupt: Off
+// Input Capture Interrupt: Off
+// Compare A Match Interrupt: Off
+// Compare B Match Interrupt: Off
+TCCR1A=(0<<COM1A1) | (0<<COM1A0) | (0<<COM1B1) | (0<<COM1B0) | (0<<WGM11) | (0<<WGM10);
+TCCR1B=(0<<ICNC1) | (0<<ICES1) | (0<<WGM13) | (0<<WGM12) | (0<<CS12) | (1<<CS11) | (1<<CS10);
+TCNT1H=0x9E;
+TCNT1L=0x58;
+ICR1H=0x00;
+ICR1L=0x00;
+OCR1AH=0x00;
+OCR1AL=0x00;
+OCR1BH=0x00;
+OCR1BL=0x00;
+
+// Timer/Counter 2 initialization
+// Clock source: System Clock
+// Clock value: 15,625 kHz
+// Mode: Normal top=0xFF
+// OC2A output: Disconnected
+// OC2B output: Disconnected
+// Timer Period: 9,984 ms
+ASSR=(0<<EXCLK) | (0<<AS2);
+TCCR2A=(0<<COM2A1) | (0<<COM2A0) | (0<<COM2B1) | (0<<COM2B0) | (0<<WGM21) | (0<<WGM20);
+TCCR2B=(0<<WGM22) | (1<<CS22) | (1<<CS21) | (1<<CS20);
+TCNT2=0x64;
+OCR2A=0x00;
+OCR2B=0x00;
+
+// Timer/Counter 0 Interrupt(s) initialization
+TIMSK0=(0<<OCIE0B) | (0<<OCIE0A) | (0<<TOIE0);
+
+// Timer/Counter 1 Interrupt(s) initialization
+TIMSK1=(0<<ICIE1) | (0<<OCIE1B) | (0<<OCIE1A) | (1<<TOIE1);
+
+// Timer/Counter 2 Interrupt(s) initialization
+TIMSK2=(0<<OCIE2B) | (0<<OCIE2A) | (0<<TOIE2);
+
+// External Interrupt(s) initialization
+// INT0: Off
+// INT1: Off
+// Interrupt on any change on pins PCINT0-7: Off
+// Interrupt on any change on pins PCINT8-14: Off
+// Interrupt on any change on pins PCINT16-23: Off
+EICRA=(0<<ISC11) | (0<<ISC10) | (0<<ISC01) | (0<<ISC00);
+EIMSK=(0<<INT1) | (0<<INT0);
+PCICR=(0<<PCIE2) | (0<<PCIE1) | (0<<PCIE0);
+
+// USART initialization
+// Communication Parameters: 8 Data, 1 Stop, No Parity
+// USART Receiver: On
+// USART Transmitter: On
+// USART0 Mode: Asynchronous
+// USART Baud Rate: 9600
+UCSR0A=(0<<RXC0) | (0<<TXC0) | (0<<UDRE0) | (0<<FE0) | (0<<DOR0) | (0<<UPE0) | (0<<U2X0) | (0<<MPCM0);
+UCSR0B=(1<<RXCIE0) | (0<<TXCIE0) | (0<<UDRIE0) | (1<<RXEN0) | (1<<TXEN0) | (0<<UCSZ02) | (0<<RXB80) | (0<<TXB80);
+UCSR0C=(0<<UMSEL01) | (0<<UMSEL00) | (0<<UPM01) | (0<<UPM00) | (0<<USBS0) | (1<<UCSZ01) | (1<<UCSZ00) | (0<<UCPOL0);
+UBRR0H=0x00;
+UBRR0L=0x67;
+
+// Analog Comparator initialization
+// Analog Comparator: Off
+// The Analog Comparator's positive input is
+// connected to the AIN0 pin
+// The Analog Comparator's negative input is
+// connected to the AIN1 pin
+ACSR=(1<<ACD) | (0<<ACBG) | (0<<ACO) | (0<<ACI) | (0<<ACIE) | (0<<ACIC) | (0<<ACIS1) | (0<<ACIS0);
+// Digital input buffer on AIN0: On
+// Digital input buffer on AIN1: On
+DIDR1=(0<<AIN0D) | (0<<AIN1D);
+
+// ADC initialization
+// ADC Clock frequency: 125,000 kHz
+// ADC Voltage Reference: AVCC pin
+// ADC Auto Trigger Source: ADC Stopped
+// Digital input buffers on ADC0: Off, ADC1: On, ADC2: On, ADC3: On
+// ADC4: On, ADC5: On
+#define ADC_VREF_TYPE ((0<<REFS1) | (0<<REFS0) | (0<<ADLAR))
+DIDR0=(0<<ADC5D) | (0<<ADC4D) | (0<<ADC3D) | (0<<ADC2D) | (0<<ADC1D) | (0<<ADC0D);
+ADMUX=ADC_VREF_TYPE;
+ADCSRA=(0<<ADEN) | (0<<ADSC) | (0<<ADATE) | (0<<ADIF) | (0<<ADIE) | (0<<ADPS2) | (0<<ADPS1) | (0<<ADPS0);
+ADCSRB=(0<<ADTS2) | (0<<ADTS1) | (0<<ADTS0);
+
+// SPI initialization
+// SPI Type: Master
+// SPI Clock Rate: 2*4000,000 kHz
+// SPI Clock Phase: Cycle Start
+// SPI Clock Polarity: Low
+// SPI Data Order: MSB First
+SPCR=(0<<SPIE) | (1<<SPE) | (0<<DORD) | (1<<MSTR) | (0<<CPOL) | (0<<CPHA) | (0<<SPR1) | (0<<SPR0);
+SPSR=(1<<SPI2X);
+
+// TWI initialization
+// TWI disabled
+TWCR=(0<<TWEA) | (0<<TWSTA) | (0<<TWSTO) | (0<<TWEN) | (0<<TWIE);
+
+// Bit-Banged I2C Bus initialization
+// I2C Port: PORTC
+// I2C SDA bit: 4
+// I2C SCL bit: 5
+// Bit Rate: 100 kHz
+// Note: I2C settings are specified in the
+// Project|Configure|C Compiler|Libraries|I2C menu.
+
+// Alphanumeric LCD initialization
+// Connections are specified in the
+// Project|Configure|C Compiler|Libraries|Alphanumeric LCD menu:
+// RS - PORTB Bit 0
+// RD - PORTB Bit 7
+// EN - PORTB Bit 1
+// D4 - PORTD Bit 4
+// D5 - PORTD Bit 5
+// D6 - PORTD Bit 6
+// D7 - PORTD Bit 7
+// Characters/line: 16
+lcd_init(16);
+}
+
+void print_uart_to_lcd()
+{
+    unsigned char i = 0, array[16];
+    
+    if(rx_wr_index)
+    {
+        delay_ms(100); 
+        lcd_clear();
+        for(i = 0; i <= rx_wr_index; i++)
+        {
+            if( rx_buffer[i] == 0x0D )
+                continue;;
+            if( rx_buffer[i] == 0x0A )
+                rx_buffer[i] = ' ';
+         
+            if(i%32 == 0 && i)
+            {
+                delay_ms(1500); 
+                lcd_clear();  
+            }
+           
+         sprintf(array, "%c", rx_buffer[i]);                            
+         lcd_puts(array); 
+        }    
+        RST_BUF;
+        delay_ms(500);
+    }    
+}
+
+void send_sms(unsigned char *txt)
+{
+    unsigned char data[30] = {0};    
+
+    strcat(data, "AT+CMGS=\"");
+    strcat(data, adm_phone_tmp);
+    strcat(data, "\"\r");
+    
+    delay_ms(100);
+    puts(data);
+    delay_ms(100);
+    puts(txt);
+    putchar(0x1A);
+}
+
+void send_call()
+{
+    unsigned char data[20] = {0};    
+
+    strcat(data, "ATD+");
+    strcat(data, adm_phone_tmp);
+    strcat(data, ";\r");
+    
+    delay_ms(500);
+    puts(data);
+    delay_ms(12000); 
+    puts("ATH0\r"); 
+    delay_ms(100);
+}
+
+void pow_sw(unsigned char var)
+{    
+    RELAY_ON;
+    
+    if(var == SHORT)
+        delay_ms(1500);
+    if(var == LONG)
+        delay_ms(7000);
+    
+    RELAY_OFF;
+    
+    delay_ms(3000);
+}
+
+void call_func()
+{
+    static unsigned char i = 0;    
+           
+    if( strstr(rx_buffer, "RING") )
+    {
+        i++;
+        puts("AT+CLIP=1\r");
+        delay_ms(100);
+                                
+        if( strstr(rx_buffer, adm_phone_tmp) )
+        {                                                
+            delay_ms(100);
+            puts("AT+CLIP=0\r");
+            delay_ms(100);
+            puts("ATH0\r");
+            i = 0;    
+            pow_sw(SHORT);
+        }
+        
+        if(i > 2)
+        {
+            i = 0;
+            delay_ms(100);
+            puts("AT+CLIP=0\r");
+            delay_ms(100);
+            puts("ATH0\r");
+        }
+    }
+}
+
+void cpy_ram_ph()
+{
+    unsigned char i = 0;
+    
+    for(i = 0; i < 11; i++)
+        adm_phone_tmp[i] = adm_phone[i];
+    adm_phone_tmp[11] = 0x00;
+}
+
+void reg_admin()
+{
+    unsigned char i = 0; 
+        
+    if( strstr(rx_buffer, "CMT") && strstr(rx_buffer, "admin123456") )
+    {
+       for(i = 0; i < 11; i++)
+        adm_phone[i] = rx_buffer[10 + i];      //записать номер админа в ипром
+        
+        adm_phone[i] = 0x00;
+        
+       lcd_clear();
+       lcd_puts("adm_ph is:");
+       lcd_gotoxy(0, 1);
+       lcd_putse(adm_phone);
+       delay_ms(5000);  
+       
+       cpy_ram_ph();  
+    }
+}
+
+void clr_sms()
+{
+    delay_ms(100);
+    puts("AT+CMGD=1,4");
+    delay_ms(100);
+}
+
+void sms_cmd()
+{
+    if( strstr(rx_buffer, "CMT") && strstr(rx_buffer, adm_phone_tmp) )
+    {      
+        if( strstr(rx_buffer, "sw_pow") ) 
+        {   
+            send_sms("SW switched!");
+            pow_sw(LONG);
+        }
+        
+        clr_sms();    
+    }
+}
+
+void sms_func()
+{
+    reg_admin();
+    sms_cmd();    
+}
+
+void wait_modem()
+{
+    unsigned char i = 0, var = 1;
+    
+    while(var)
+    {   
+        i++;
+        LED=0;
+        delay_ms(2000);
+        LED=1;
+        lcd_clear();
+        lcd_puts("wait modem...");        
+            
+        if(i==5)
+        {
+             i=0;
+             rst_gsm();
+             delay_ms(2000); 
+        }
+         
+        puts("AT\r");
+        delay_ms(100);
+        if( strstr(rx_buffer, "OK") )
+            var=0;
+    }  
+}
+
+void conf_m590()
+{
+    wait_modem();
+    
+    lcd_clear();
+    lcd_puts("Modem ok!");
+    delay_ms(1000);
+      
+    puts("AT+CMGF=1\r");            //включить текстовый режим 
+    delay_ms(1000);
+    puts("AT+CSCS=\"GSM\"\r");          //УGSMФ Ц кодировка ASCII
+    delay_ms(1000);    
+    puts("AT+CNMI=2,2\r");          //не сохран€ть SMS в пам€ти;  
+    delay_ms(1000);
+}
+
+void gsm_func()
+{            
+    if(rx_wr_index)
+    {
+        delay_ms(100);        
+        call_func();
+        sms_func();
+        print_uart_to_lcd();
+        memset(rx_buffer, 0, 254);               
+    }      
+}
+
+void rst_gsm()
+{
+    POWER_SW = 1;
+    delay_ms(350);
+    POWER_SW = 0;
+}
+
+void gsm_ping()
+{
+    if( SBRS(flag, START_PING_GSM) )
+    {  
+        puts("AT+CREG?\r");
+        delay_ms(100);        
+        
+        if( !strstr(rx_buffer, "CREG: 0,1") )
+        {
+            lcd_clear();
+            lcd_puts("RST_GSM");
+            delay_ms(500);
+            rst_gsm();
+        }                                                               
+        
+        CBR(flag, START_PING_GSM);
+    }  
+}
+
+void pc_pow_control()
+{    
+    
+    if( IN_5V && SBRC(flag, CALL_SENDED) )
+    {
+        
+        send_call();
+        SBR(flag, CALL_SENDED);
+        
+    }        
+    else if(!IN_5V)
+            CBR(flag, CALL_SENDED);
+        
+}
+
+void main(void)
+{
+    init_dev();
+    LIGHT_LCD = 1;    
+    cpy_ram_ph();
+    lcd_clear();
+    lcd_puts("adm_ph is:");
+    lcd_gotoxy(0, 1);
+    lcd_putse(adm_phone);        
+    #asm("sei");    
+    conf_m590();
+    lcd_clear();
+    lcd_puts("working...");      
+    
+      while (1)
+      {        
+            gsm_func();
+            gsm_ping();
+            print_uart_to_lcd();
+            delay_ms(500);
+            pc_pow_control();                        
+      }
+}
